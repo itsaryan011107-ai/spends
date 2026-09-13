@@ -3,3 +3,5 @@ dist
 .env
 .env.local
 .vscode
+*.code-workspace
+.vercel

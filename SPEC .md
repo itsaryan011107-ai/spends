@@ -1,4 +1,4 @@
-# FinCheck - Finance Tracker — V1 Specification
+# Spends - Finance Tracker — V1 Specification
 
 ## 1. Product Overview
 
