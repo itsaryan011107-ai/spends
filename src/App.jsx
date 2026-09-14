@@ -1,4 +1,5 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { AnimatePresence, motion } from 'framer-motion'
 import {
   ArrowDownLeft,
   ArrowUpRight,
@@ -10,6 +11,7 @@ import {
   CreditCard,
   Home,
   Moon,
+  Play,
   Plus,
   Search,
   Settings,
@@ -57,10 +59,25 @@ function App() {
   const [toast, setToast] = useState(null)
   const [onboarding, setOnboarding] = useState(() => localStorage.getItem('spends-onboarding-seen') !== 'true')
   const [onboardingStep, setOnboardingStep] = useState(0)
+  const [tutorialComplete, setTutorialComplete] = useState(() => localStorage.getItem('spends-tutorial-complete') === 'true')
+  const [tutorialActive, setTutorialActive] = useState(false)
+  const [tutorialStep, setTutorialStep] = useState(0)
+  const [tutorialBubble, setTutorialBubble] = useState({ top: 0, left: 0 })
   const [simulatedDate, setSimulatedDate] = useState(() => localStorage.getItem('spends-simulated-date') || localStorage.getItem('fincheck-simulated-date') || isoToday)
   const [profile, setProfile] = useState(() => { try { const saved = JSON.parse(localStorage.getItem('spends-profile') || localStorage.getItem('fincheck-profile')); return { name: saved?.name || 'Arjun' } } catch { return { name: 'Arjun' } } })
 
   const metrics = useMemo(() => calculateMetrics(data, simulatedDate), [data, simulatedDate])
+
+  const tutorialSteps = useMemo(() => [
+    { target: 'allowance', eyebrow: 'STEP 1', title: 'Start with allowance', body: 'Begin by entering your allowance so Spends can use it as the starting balance for this cycle.' },
+    { target: 'expense', eyebrow: 'STEP 2', title: 'Log expenses regularly', body: 'Keep adding expenses so the forecast stays grounded in the reality of your spending.' },
+    { target: 'forecast', eyebrow: 'STEP 3', title: 'Watch the runway forecast', body: 'Spends estimates how long your balance may last based on your recent daily pace.' },
+    { target: 'pace', eyebrow: 'STEP 4', title: 'Check your spending pace', body: 'Use this card to spot whether your expenses are rising, falling, or holding steady.' },
+    { target: 'average', eyebrow: 'STEP 5', title: 'Review the 7-day average', body: 'This gives you a cleaner view of your recent habits when daily swings feel noisy.' },
+    { target: 'spent', eyebrow: 'STEP 6', title: 'See total spent', body: 'Track how much of the cycle budget has already been used so you can course-correct early.' },
+  ], [])
+
+  const currentTutorialStep = useMemo(() => tutorialSteps[tutorialStep] || tutorialSteps[0], [tutorialStep, tutorialSteps])
 
   const persist = (next) => {
     setData(next)
@@ -137,11 +154,84 @@ function App() {
     setOnboarding(false)
   }
 
+  const startTutorial = () => {
+    setActiveView('dashboard')
+    setTutorialStep(0)
+    setTutorialActive(true)
+  }
+
+  const finishTutorial = () => {
+    localStorage.setItem('spends-tutorial-complete', 'true')
+    setTutorialComplete(true)
+    setTutorialActive(false)
+    setTutorialStep(0)
+  }
+
+  const skipTutorial = () => {
+    localStorage.setItem('spends-tutorial-complete', 'true')
+    setTutorialComplete(true)
+    setTutorialActive(false)
+    setTutorialStep(0)
+  }
+
+  useEffect(() => {
+    if (!onboarding && !tutorialComplete && !tutorialActive && activeView === 'dashboard') {
+      const timer = window.setTimeout(() => {
+        setTutorialActive(true)
+        setTutorialStep(0)
+      }, 450)
+      return () => window.clearTimeout(timer)
+    }
+  }, [onboarding, tutorialComplete, tutorialActive, activeView])
+
+  useEffect(() => {
+    if (!tutorialActive) return
+
+    const stepTarget = currentTutorialStep?.target
+    const targetNode = stepTarget ? document.querySelector(`[data-tutorial-target="${stepTarget}"]`) : null
+
+    if (targetNode) {
+      targetNode.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' })
+    }
+  }, [tutorialActive, currentTutorialStep])
+
+  useEffect(() => {
+    if (!tutorialActive) return
+
+    const updateBubblePosition = () => {
+      const stepTarget = currentTutorialStep?.target
+      const targetNode = stepTarget ? document.querySelector(`[data-tutorial-target="${stepTarget}"]`) : null
+      if (!targetNode) return
+
+      const rect = targetNode.getBoundingClientRect()
+      const bubbleWidth = 290
+      const left = Math.min(Math.max(18, rect.left + rect.width / 2 - bubbleWidth / 2), window.innerWidth - bubbleWidth - 18)
+      const top = Math.max(18, rect.top - 155)
+
+      setTutorialBubble((current) => {
+        if (Math.abs(current.top - top) < 1 && Math.abs(current.left - left) < 1) {
+          return current
+        }
+
+        return { top, left }
+      })
+    }
+
+    updateBubblePosition()
+    window.addEventListener('resize', updateBubblePosition)
+    window.addEventListener('scroll', updateBubblePosition, true)
+
+    return () => {
+      window.removeEventListener('resize', updateBubblePosition)
+      window.removeEventListener('scroll', updateBubblePosition, true)
+    }
+  }, [tutorialActive, currentTutorialStep, data.allowances.length])
+
   const activity = [...data.expenses.map((item) => ({ ...item, kind: 'expense' })), ...data.allowances.map((item) => ({ ...item, kind: 'allowance' }))].sort((a, b) => `${b.date}${b.time || ''}`.localeCompare(`${a.date}${a.time || ''}`))
   const activeNavIndex = { dashboard: 0, transactions: 1, insights: 2, settings: 3 }[activeView] ?? 0
 
   return (
-    <div className={dark ? 'app dark' : 'app'}>
+    <div className={`${dark ? 'app dark' : 'app'} ${tutorialActive ? 'tutorial-active' : ''}`}>
       <aside className="sidebar">
         <div className="brand"><span className="brand-mark"><img src={spendsLogo} alt="" /></span><span>Spends</span></div>
         <button className="profile" onClick={() => setModal('profile')}><div className="avatar">{profile.name.charAt(0).toUpperCase() || 'A'}</div><div><strong>{profile.name || 'Your name'}</strong><span>Personal account</span></div><ChevronRight size={15} /></button>
@@ -158,7 +248,7 @@ function App() {
         </div>
       </aside>
       <main className="main">
-        <header className="topbar"><div><div className="header-mascot">{walletStatus(metrics.balance).mascot}</div><div className="mobile-header-brand"><img src={spendsLogo} alt="" /><span>Spends</span></div><h1>{activeView === 'dashboard' ? 'Your wallet lore, at a glance.' : activeView === 'transactions' ? 'Transactions' : activeView === 'insights' ? 'Your spending patterns.' : activeView === 'faq' ? 'Answers, at a glance.' : 'Preferences.'}</h1></div><div className="top-actions"><button className="icon-button" title="Frequently asked questions" onClick={() => setActiveView('faq')}><CircleHelp size={19} /></button><div className="online"><span /> Local data only</div></div></header>
+        <header className="topbar"><div><div className="header-mascot">{walletStatus(metrics.balance).mascot}</div><div className="mobile-header-brand"><img src={spendsLogo} alt="" /><span>Spends</span></div><h1>{activeView === 'dashboard' ? 'Your wallet lore, at a glance.' : activeView === 'transactions' ? 'Transactions' : activeView === 'insights' ? 'Your spending patterns.' : activeView === 'faq' ? 'Answers, at a glance.' : 'Preferences.'}</h1></div><div className="top-actions"><button className="icon-button" title="Replay tutorial" onClick={startTutorial}><Play size={17} /></button><button className="icon-button" title="Frequently asked questions" onClick={() => setActiveView('faq')}><CircleHelp size={19} /></button><div className="online"><span /> Local data only</div></div></header>
         {activeView === 'dashboard' && <Dashboard metrics={metrics} activity={activity} simulatedDate={simulatedDate} onAddExpense={() => setModal('expense')} onAddAllowance={() => setModal('allowance')} onSelect={setSelected} />}
         {activeView === 'transactions' && <Transactions activity={activity} canAddExpense={metrics.balance > 0} onAddExpense={() => setModal('expense')} onAddAllowance={() => setModal('allowance')} onSelect={setSelected} />}
         {activeView === 'insights' && <Insights metrics={metrics} spendingDays={spendingByDate(data.expenses, simulatedDate)} animationKey={insightsAnimation} />}
@@ -169,6 +259,29 @@ function App() {
       {modal === 'allowance' && <AllowanceModal currentDate={simulatedDate} onClose={() => setModal(null)} onSubmit={submitAllowance} />}
       {modal === 'profile' && <ProfileModal profile={profile} onClose={() => setModal(null)} onSubmit={updateProfile} />}
       {selected && <DetailsModal item={selected} onClose={() => setSelected(null)} onDelete={selected.kind === 'expense' && selected.source === 'manual' ? () => deleteExpense(selected.id) : null} />}
+      <AnimatePresence>
+        {tutorialActive && currentTutorialStep && (
+          <motion.div
+            className="tutorial-bubble"
+            initial={{ opacity: 0, y: 18, scale: 0.97 }}
+            animate={{ opacity: 1, y: 0, scale: 1, left: tutorialBubble.left, top: tutorialBubble.top }}
+            exit={{ opacity: 0, y: 10, scale: 0.97 }}
+            transition={{ duration: 0.36, ease: 'easeOut' }}
+            style={{ top: tutorialBubble.top, left: tutorialBubble.left }}
+          >
+            <div className="tutorial-bubble-header">
+              <span>{currentTutorialStep.eyebrow}</span>
+            </div>
+            <h3>{currentTutorialStep.title}</h3>
+            <p>{currentTutorialStep.body}</p>
+            <div className="tutorial-bubble-actions">
+              <button className="tutorial-button ghost" type="button" onClick={() => setTutorialStep((step) => Math.max(0, step - 1))} disabled={tutorialStep === 0}>Back</button>
+              <button className="tutorial-button secondary" type="button" onClick={skipTutorial}>Skip Tutorial</button>
+              <button className="tutorial-button primary" type="button" onClick={tutorialStep === tutorialSteps.length - 1 ? finishTutorial : () => setTutorialStep((step) => Math.min(tutorialSteps.length - 1, step + 1))}>{tutorialStep === tutorialSteps.length - 1 ? 'Finish' : 'Continue'}</button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
       {toast && <div className="toast"><span className="toast-icon"><Check size={16} /></span><div><strong>{toast}</strong><small>Balance updated from your ledger</small></div><button onClick={() => setToast(null)}><X size={16} /></button></div>}
       {onboarding && <Onboarding step={onboardingStep} onStepChange={setOnboardingStep} onFinish={finishOnboarding} initialName={profile.name} />}
     </div>
@@ -211,16 +324,16 @@ function Dashboard({ metrics, activity, simulatedDate, onAddExpense, onAddAllowa
   return <div className="content dashboard-content"><OverviewHoverSurface>
     <HoverSliderGroup className="hero-grid">
       <div className="balance-card overview-hover-card"><img className="balance-wireframe" src={spendsLogoWireframe} alt="" /><div className="card-label light-label"><span className="status-dot" /> WALLET</div><div className="balance-value">{money(metrics.balance)}</div><p className="balance-caption">{status.mascot} Status: <strong>{status.label}</strong> · as of {toDisplayDate(simulatedDate)}</p><div className="hp-meter"><span style={{ width: `${Math.min(100, Math.max(4, metrics.balance / Math.max(metrics.latestAllowance?.amount || metrics.balance, 1) * 100))}%` }} /></div><div className="balance-footer"><span><ArrowDownLeft size={15} /> {money(metrics.totalReceived)} received</span><span><ArrowUpRight size={15} /> {money(metrics.totalSpent)} spent</span></div></div>
-      <button className="expense-hero-card overview-hover-card" disabled={metrics.balance <= 0} onClick={onAddExpense}><span className="expense-hero-icon"><Plus size={34} /></span><span className="card-label">QUICK LOG</span><strong>Add Expense</strong><p>{metrics.balance > 0 ? 'Quickly log spending before you forget.' : 'Add allowance before logging spending.'}</p></button>
+      <button className="expense-hero-card overview-hover-card" data-tutorial-target="expense" disabled={metrics.balance <= 0} onClick={onAddExpense}><span className="expense-hero-icon"><Plus size={34} /></span><span className="card-label">QUICK LOG</span><strong>Add Expense</strong><p>{metrics.balance > 0 ? 'Quickly log spending before you forget.' : 'Add allowance before logging spending.'}</p></button>
     </HoverSliderGroup>
     <HoverSliderGroup className="metric-grid">
-      <Metric label="Spending pace" value={`${money(metrics.dailyAverage)}/day`} detail="Since latest allowance" accent="green" />
-      <Metric label="7-day average" value={`${money(metrics.rollingAverage)}/day`} detail="Includes zero-spend days" />
-      <Metric label="Total spent" value={money(metrics.totalSpent)} detail={`${metrics.totalReceived ? Math.round(metrics.totalSpent / metrics.totalReceived * 100) : 0}% of money received`} />
+      <Metric label="Spending pace" value={`${money(metrics.dailyAverage)}/day`} detail="Since latest allowance" accent="green" tutorialTarget="pace" />
+      <Metric label="7-day average" value={`${money(metrics.rollingAverage)}/day`} detail="Includes zero-spend days" tutorialTarget="average" />
+      <Metric label="Total spent" value={money(metrics.totalSpent)} detail={`${metrics.totalReceived ? Math.round(metrics.totalSpent / metrics.totalReceived * 100) : 0}% of money received`} tutorialTarget="spent" />
     </HoverSliderGroup>
     <HoverSliderGroup className="lower-grid">
-      <div className="panel forecast-panel overview-hover-card"><div className="card-label">RUNWAY FORECAST</div><h2>{metrics.runway ? `${Math.round(metrics.runway)} days until going broke` : 'Not enough data'}</h2><p>{metrics.runway ? 'At current pace' : 'Add spending data to estimate how long your balance may last.'}</p>{metrics.runout && <div className="forecast-date">Projected run-out <strong>{metrics.runout.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</strong></div>}</div>
-      <div className="panel cycle-panel overview-hover-card"><div className="card-label">THIS CYCLE</div><h2>{metrics.latestAllowance ? money(metrics.latestAllowance.amount) : '—'}</h2><p>{metrics.latestAllowance ? `Received ${formatMonthDay(metrics.latestAllowance.date)}${metrics.latestAllowance.note ? ` · ${metrics.latestAllowance.note}` : ''}` : 'No resources detected. Touch grass or add allowance.'}</p><div className="cycle-stat"><span>Spent this cycle</span><strong>{money(metrics.cycleSpent)}</strong></div><div className="cycle-stat"><span>Cycle pace</span><strong>{money(metrics.cycleAverage)}<small>/day</small></strong></div><button className="outline-button full" onClick={onAddAllowance}><Plus size={16} /> Add allowance</button></div>
+      <div className="panel forecast-panel overview-hover-card" data-tutorial-target="forecast"><div className="card-label">RUNWAY FORECAST</div><h2>{metrics.runway ? `${Math.round(metrics.runway)} days until going broke` : 'Not enough data'}</h2><p>{metrics.runway ? 'At current pace' : 'Add spending data to estimate how long your balance may last.'}</p>{metrics.runout && <div className="forecast-date">Projected run-out <strong>{metrics.runout.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</strong></div>}</div>
+      <div className="panel cycle-panel overview-hover-card" data-tutorial-target="allowance"><div className="card-label">THIS CYCLE</div><h2>{metrics.latestAllowance ? money(metrics.latestAllowance.amount) : '—'}</h2><p>{metrics.latestAllowance ? `Received ${formatMonthDay(metrics.latestAllowance.date)}${metrics.latestAllowance.note ? ` · ${metrics.latestAllowance.note}` : ''}` : 'No resources detected. Touch grass or add allowance.'}</p><div className="cycle-stat"><span>Spent this cycle</span><strong>{money(metrics.cycleSpent)}</strong></div><div className="cycle-stat"><span>Cycle pace</span><strong>{money(metrics.cycleAverage)}<small>/day</small></strong></div><button className="outline-button full" onClick={onAddAllowance}><Plus size={16} /> Add allowance</button></div>
     </HoverSliderGroup>
   </OverviewHoverSurface></div>
 }
@@ -265,7 +378,7 @@ function HoverSliderGroup({ className, children }) {
   return <section className={`overview-hover-group ${className}`}>{children}</section>
 }
 
-function Metric({ label, value, detail, accent }) { return <div className="metric overview-hover-card"><span className="metric-label">{label}</span><strong className={accent === 'green' ? 'green-text' : ''}>{value}</strong><small>{detail}</small></div> }
+function Metric({ label, value, detail, accent, tutorialTarget }) { return <div className="metric overview-hover-card" data-tutorial-target={tutorialTarget}><span className="metric-label">{label}</span><strong className={accent === 'green' ? 'green-text' : ''}>{value}</strong><small>{detail}</small></div> }
 function ActivityRow({ item, onClick }) { const allowance = item.kind === 'allowance'; return <button className="activity-row" onClick={onClick}><span className={allowance ? 'activity-icon allowance' : 'activity-icon expense'}>{allowance ? <ArrowDownLeft size={17} /> : <ArrowUpRight size={17} />}</span><span className="activity-main"><strong>{allowance ? (item.note || 'Allowance') : (item.merchant || 'Expense')}</strong><small>{formatMonthDay(item.date)}{item.time ? ` · ${formatTime(item.time)}` : ''} · {allowance ? 'Money in' : `${item.category || 'Other'} · ${item.source === 'email' ? 'Imported' : 'Manual'}`}</small></span><strong className={allowance ? 'amount positive' : 'amount'}>{allowance ? '+' : '-'}{shortMoney(item.amount)}</strong><ChevronRight size={16} className="row-chevron" /></button> }
 
 function Transactions({ activity, canAddExpense, onAddExpense, onAddAllowance, onSelect }) { const [filter, setFilter] = useState('all'); const filtered = filter === 'all' ? activity : activity.filter((item) => item.kind === filter); return <div className="content transactions-content"><div className="view-toolbar"><div><div className="card-label">LEDGER</div><h2>All activity <span className="count-pill">{activity.length}</span></h2></div><div className="toolbar-actions"><button className="secondary-button" onClick={onAddAllowance}><ArrowDownLeft size={16} /> Allowance</button><button className="primary-button" disabled={!canAddExpense} onClick={onAddExpense}><Plus size={16} /> Expense</button></div></div><div className="filter-row"><div className="segmented"><button className={filter === 'all' ? 'selected' : ''} onClick={() => setFilter('all')}>All</button><button className={filter === 'expense' ? 'selected' : ''} onClick={() => setFilter('expense')}>Expenses</button><button className={filter === 'allowance' ? 'selected' : ''} onClick={() => setFilter('allowance')}>Allowances</button></div><div className="search-box"><Search size={16} /><input placeholder="Search activity" /></div></div><div className="table-panel"><div className="table-header"><span>ACTIVITY</span><span>DATE</span><span>SOURCE</span><span>AMOUNT</span><span /></div>{filtered.map((item) => <button className="table-row" key={`${item.kind}-${item.id}`} onClick={() => onSelect(item)}><span className="table-activity"><span className={item.kind === 'allowance' ? 'activity-icon allowance' : 'activity-icon expense'}>{item.kind === 'allowance' ? <ArrowDownLeft size={16} /> : <ArrowUpRight size={16} />}</span><span><strong>{item.kind === 'allowance' ? item.note || 'Allowance' : item.merchant || 'Expense'}</strong><small>{item.kind === 'allowance' ? 'Money received' : item.category || 'Other'}</small></span></span><span>{formatDate(item.date)}{item.time && <small>{formatTime(item.time)}</small>}</span><span className="source-tag">{item.kind === 'allowance' ? 'Manual' : item.source === 'email' ? 'FamPay email' : 'Manual'}</span><strong className={item.kind === 'allowance' ? 'positive' : ''}>{item.kind === 'allowance' ? '+' : '-'}{shortMoney(item.amount)}</strong><ChevronRight size={16} /></button>)}</div></div> }
