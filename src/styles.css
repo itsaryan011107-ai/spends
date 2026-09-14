@@ -328,6 +328,48 @@ nav { display: grid; gap: 5px; }.nav-button { display: flex; align-items: center
   background: var(--lime);
 }
 
+@media (max-width: 680px) {
+  .sidebar {
+    left: 16px;
+    right: 16px;
+    bottom: max(12px, env(safe-area-inset-bottom, 0px));
+    width: auto;
+    height: 70px;
+    min-height: 70px;
+    padding: 4px;
+    border: 1px solid rgba(0, 255, 179, .16);
+    border-radius: 24px;
+    background: rgba(15, 32, 23, .86);
+    box-shadow: 0 14px 35px rgba(0, 0, 0, .28), inset 0 1px 0 rgba(255, 255, 255, .06);
+    backdrop-filter: blur(18px);
+  }
+
+  .sidebar nav {
+    height: 66px;
+    align-items: center;
+    padding: 4px;
+  }
+
+  .sidebar nav::before {
+    top: 4px;
+    bottom: 4px;
+    left: 4px;
+    width: calc((100% - 20px) / 4);
+    border-radius: 17px;
+  }
+
+  .nav-button,
+  .nav-button.active {
+    height: 58px;
+    align-items: center;
+    padding: 0 8px;
+  }
+
+  .main {
+    padding-bottom: calc(94px + env(safe-area-inset-bottom, 0px));
+  }
+}
+
 .app:not(.dark) .secondary-button,
 .app:not(.dark) .outline-button,
 .app:not(.dark) .setting-control,
