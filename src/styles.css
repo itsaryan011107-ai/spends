@@ -9,6 +9,7 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, .app::-webkit-scrollbar {
   display: none;
 }
 body { margin: 0; min-width: 320px; background: var(--canvas); }
+html, body, #root { min-height: 100%; }
 button, input, select { font: inherit; }
 button { border: 0; cursor: pointer; } button:disabled { cursor: not-allowed; opacity: .45; }
 .app { display: flex; min-height: 100vh; position: relative; overflow: hidden; background: radial-gradient(circle at 82% -12%, rgba(0,255,179,.09), transparent 28%), radial-gradient(circle at 18% 85%, rgba(139,92,246,.045), transparent 22%), #07110d; color: var(--ink); }
@@ -329,6 +330,11 @@ nav { display: grid; gap: 5px; }.nav-button { display: flex; align-items: center
 }
 
 @media (max-width: 680px) {
+  .app {
+    min-height: 100dvh;
+    padding-top: env(safe-area-inset-top, 0px);
+  }
+
   .sidebar {
     left: 16px;
     right: 16px;
