@@ -9,9 +9,11 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, .app::-webkit-scrollbar {
   display: none;
 }
 body { margin: 0; min-width: 320px; background: var(--canvas); }
-html, body, #root { min-height: 100%; }
-button, input, select { font: inherit; }
+html, body, #root { min-height: 100%; -webkit-tap-highlight-color: transparent; }
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+button, input, select { font: inherit; -webkit-tap-highlight-color: transparent; }
 button { border: 0; cursor: pointer; } button:disabled { cursor: not-allowed; opacity: .45; }
+button:focus, a:focus, input:focus, select:focus { outline: none; }
 .app { display: flex; min-height: 100vh; position: relative; overflow: hidden; background: radial-gradient(circle at 82% -12%, rgba(0,255,179,.09), transparent 28%), radial-gradient(circle at 18% 85%, rgba(139,92,246,.045), transparent 22%), #07110d; color: var(--ink); }
 .mobile-header-brand { display: none; }
 .app:before { content: '₹  ✦  ₹  ·  ✧  ₹  ·  ◌'; position: fixed; inset: 0; pointer-events: none; opacity: .055; color: var(--lime); font: 18px 'Space Grotesk'; letter-spacing: 46px; line-height: 118px; transform: rotate(-8deg) scale(1.15); background-image: linear-gradient(rgba(223,255,95,.08) 1px, transparent 1px), linear-gradient(90deg, rgba(223,255,95,.08) 1px, transparent 1px); background-size: 42px 42px; mask-image: linear-gradient(to bottom, black, transparent 82%); }
