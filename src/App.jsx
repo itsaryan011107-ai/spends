@@ -10,9 +10,11 @@ import {
   Clock3,
   CreditCard,
   Home,
+  Mail,
   Moon,
   Play,
   Plus,
+  RefreshCw,
   Search,
   Settings,
   Sun,
@@ -20,8 +22,11 @@ import {
   X,
 } from 'lucide-react'
 import { calculateMetrics, spendingByDate, toLocalIsoDate } from './metrics.js'
+import { fetchGmailReceipts, getStoredToken, isDuplicateExpense } from './gmail.js'
 import spendsLogo from './assets/spends-logo.png'
 import spendsLogoWireframe from './assets/spends-logo-wireframe.png'
+import AutoLogEmailModal from './components/AutoLogEmailModal.jsx'
+import './email-modal.css'
 
 const today = new Date()
 const isoToday = today.toISOString().slice(0, 10)
@@ -31,8 +36,9 @@ const seedData = {
   expenses: [],
 }
 
-const money = (value) => `${value < 0 ? '-' : ''}₹${Math.abs(Math.round(value)).toLocaleString('en-IN')}`
-const shortMoney = (value) => `${value < 0 ? '-' : ''}₹${Math.abs(Math.round(value)).toLocaleString('en-IN')}`
+const formatMoneyValue = (value) => Math.abs(Number(value) || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })
+const money = (value) => `${value < 0 ? '-' : ''}₹${formatMoneyValue(value)}`
+const shortMoney = (value) => `${value < 0 ? '-' : ''}₹${formatMoneyValue(value)}`
 const formatDate = (date) => new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(`${date}T00:00:00`))
 const formatMonthDay = (date) => new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short' }).format(new Date(`${date}T00:00:00`))
 const formatTime = (time) => time ? new Intl.DateTimeFormat('en-IN', { hour: 'numeric', minute: '2-digit' }).format(new Date(`2026-01-01T${time}`)) : ''
@@ -58,6 +64,7 @@ function App() {
   const [dark, setDark] = useState(() => localStorage.getItem('spends-theme') !== 'light' && localStorage.getItem('fincheck-theme') !== 'light')
   const [toast, setToast] = useState(null)
   const [onboarding, setOnboarding] = useState(() => localStorage.getItem('spends-onboarding-seen') !== 'true')
+  const [gmailIntroPrompt, setGmailIntroPrompt] = useState(false)
   const [onboardingStep, setOnboardingStep] = useState(0)
   const [tutorialComplete, setTutorialComplete] = useState(() => localStorage.getItem('spends-tutorial-complete') === 'true')
   const [tutorialActive, setTutorialActive] = useState(false)
@@ -70,7 +77,7 @@ function App() {
 
   const tutorialSteps = useMemo(() => [
     { target: 'allowance', eyebrow: 'STEP 1', title: 'Start with allowance', body: 'Begin by entering your allowance so Spends can use it as the starting balance for this cycle.' },
-    { target: 'expense', eyebrow: 'STEP 2', title: 'Log expenses regularly', body: 'Keep adding expenses so the forecast stays grounded in the reality of your spending.' },
+    { target: 'expense', eyebrow: 'STEP 2', title: 'Keep cash payments counted', body: 'UPI payments can be detected from Gmail. For cash payments, add the expense manually so your balance stays accurate.' },
     { target: 'forecast', eyebrow: 'STEP 3', title: 'Watch the runway forecast', body: 'Spends estimates how long your balance may last based on your recent daily pace.' },
     { target: 'pace', eyebrow: 'STEP 4', title: 'Check your spending pace', body: 'Use this card to spot whether your expenses are rising, falling, or holding steady.' },
     { target: 'average', eyebrow: 'STEP 5', title: 'Review the 7-day average', body: 'This gives you a cleaner view of your recent habits when daily swings feel noisy.' },
@@ -92,6 +99,42 @@ function App() {
     setToast(`${money(expense.amount)} spent at ${expense.merchant || 'Unlisted merchant'}`)
     setTimeout(() => setToast(null), 4000)
   }
+
+  const importEmailExpenses = (receipts) => {
+    const existing = data.expenses || []
+    const allowanceDate = metrics.latestAllowance?.date
+    const fresh = receipts.filter((receipt) => (!allowanceDate || receipt.date >= allowanceDate) && !existing.some((expense) => isDuplicateExpense(expense, receipt)))
+    if (!fresh.length) return 0
+    const expenses = fresh.map((receipt) => ({ ...receipt, id: crypto.randomUUID(), transactionId: receipt.upiRef }))
+    persist({ ...data, expenses: [...expenses, ...existing] })
+    setToast(`${expenses.length} receipt${expenses.length === 1 ? '' : 's'} added to your ledger`)
+    setTimeout(() => setToast(null), 4000)
+    return expenses.length
+  }
+
+  const [gmailSyncing, setGmailSyncing] = useState(false)
+  const syncGmailSilently = async () => {
+    const token = getStoredToken()
+    if (!token || !metrics.latestAllowance || gmailSyncing) return
+    setGmailSyncing(true)
+    try {
+      const receipts = await fetchGmailReceipts(token.accessToken)
+      importEmailExpenses(receipts)
+    } catch {
+      // A background sync should never interrupt the ledger experience.
+    } finally {
+      setGmailSyncing(false)
+    }
+  }
+
+  const handleSyncGmail = () => {
+    if (getStoredToken()) syncGmailSilently()
+    else setModal('email')
+  }
+
+  useEffect(() => {
+    syncGmailSilently()
+  }, [metrics.latestAllowance?.date])
 
   const submitAllowance = (form) => {
     const allowance = { ...form, id: crypto.randomUUID(), amount: Number(form.amount), createdAt: `${form.date}T08:00:00` }
@@ -144,7 +187,7 @@ function App() {
   }
 
   const finishOnboarding = (name) => {
-    const nextName = name?.trim()
+    const nextName = typeof name === 'string' ? name.trim() : ''
     if (nextName) {
       const nextProfile = { name: nextName }
       setProfile(nextProfile)
@@ -152,6 +195,8 @@ function App() {
     }
     localStorage.setItem('spends-onboarding-seen', 'true')
     setOnboarding(false)
+    setGmailIntroPrompt(true)
+    setModal('email')
   }
 
   const startTutorial = () => {
@@ -175,14 +220,14 @@ function App() {
   }
 
   useEffect(() => {
-    if (!onboarding && !tutorialComplete && !tutorialActive && activeView === 'dashboard') {
+    if (!onboarding && !gmailIntroPrompt && !tutorialComplete && !tutorialActive && activeView === 'dashboard') {
       const timer = window.setTimeout(() => {
         setTutorialActive(true)
         setTutorialStep(0)
       }, 450)
       return () => window.clearTimeout(timer)
     }
-  }, [onboarding, tutorialComplete, tutorialActive, activeView])
+  }, [onboarding, gmailIntroPrompt, tutorialComplete, tutorialActive, activeView])
 
   useEffect(() => {
     if (!tutorialActive) return
@@ -248,8 +293,8 @@ function App() {
         </div>
       </aside>
       <main className="main">
-        <header className="topbar"><div><div className="header-mascot">{walletStatus(metrics.balance).mascot}</div><div className="mobile-header-brand"><img src={spendsLogo} alt="" /><span>Spends</span></div><h1>{activeView === 'dashboard' ? 'Your wallet lore, at a glance.' : activeView === 'transactions' ? 'Transactions' : activeView === 'insights' ? 'Your spending patterns.' : activeView === 'faq' ? 'Answers, at a glance.' : 'Preferences.'}</h1></div><div className="top-actions"><button className="icon-button" title="Replay tutorial" onClick={startTutorial}><Play size={17} /></button><button className="icon-button" title="Frequently asked questions" onClick={() => setActiveView('faq')}><CircleHelp size={19} /></button><div className="online"><span /> Local data only</div></div></header>
-        {activeView === 'dashboard' && <Dashboard metrics={metrics} activity={activity} simulatedDate={simulatedDate} onAddExpense={() => setModal('expense')} onAddAllowance={() => setModal('allowance')} onSelect={setSelected} />}
+        <header className="topbar"><div><div className="header-mascot">{walletStatus(metrics.balance).mascot}</div><div className="mobile-header-brand"><img src={spendsLogo} alt="" /><span>Spends</span></div><h1>{activeView === 'dashboard' ? 'Your wallet lore, at a glance.' : activeView === 'transactions' ? 'Transactions' : activeView === 'insights' ? 'Your spending patterns.' : activeView === 'faq' ? 'Answers, at a glance.' : 'Preferences.'}</h1></div><div className="top-actions"><button className="icon-button" title="Auto-log Gmail receipts" onClick={() => setModal('email')}><Mail size={17} /></button><button className="icon-button" title="Replay tutorial" onClick={startTutorial}><Play size={17} /></button><button className="icon-button" title="Frequently asked questions" onClick={() => setActiveView('faq')}><CircleHelp size={19} /></button><div className="online"><span /> Local data only</div></div></header>
+        {activeView === 'dashboard' && <Dashboard metrics={metrics} activity={activity} simulatedDate={simulatedDate} onAddExpense={() => setModal('expense')} onAddAllowance={() => setModal('allowance')} onSyncGmail={handleSyncGmail} gmailSyncing={gmailSyncing} onSelect={setSelected} />}
         {activeView === 'transactions' && <Transactions activity={activity} canAddExpense={metrics.balance > 0} onAddExpense={() => setModal('expense')} onAddAllowance={() => setModal('allowance')} onSelect={setSelected} />}
         {activeView === 'insights' && <Insights metrics={metrics} spendingDays={spendingByDate(data.expenses, simulatedDate)} animationKey={insightsAnimation} />}
         {activeView === 'faq' && <Faq />}
@@ -258,6 +303,7 @@ function App() {
       {modal === 'expense' && <ExpenseModal currentDate={simulatedDate} onClose={() => setModal(null)} onSubmit={submitExpense} />}
       {modal === 'allowance' && <AllowanceModal currentDate={simulatedDate} onClose={() => setModal(null)} onSubmit={submitAllowance} />}
       {modal === 'profile' && <ProfileModal profile={profile} onClose={() => setModal(null)} onSubmit={updateProfile} />}
+      {modal === 'email' && <AutoLogEmailModal existingExpenses={data.expenses} allowanceDate={metrics.latestAllowance?.date} onClose={() => { setModal(null); setGmailIntroPrompt(false) }} onImport={importEmailExpenses} />}
       {selected && <DetailsModal item={selected} onClose={() => setSelected(null)} onDelete={selected.kind === 'expense' && selected.source === 'manual' ? () => deleteExpense(selected.id) : null} />}
       <AnimatePresence>
         {tutorialActive && currentTutorialStep && (
@@ -293,7 +339,7 @@ function Onboarding({ step, onStepChange, onFinish, initialName }) {
     const slides = [
       <div className="onboarding-slide onboarding-brand" key="brand"><img src={spendsLogo} alt="" /><div className="onboarding-kicker">WELCOME TO</div><h2>Spends</h2><p>Your money, before it runs out.</p></div>,
       <div className="onboarding-slide" key="problem"><span className="onboarding-number">01</span><div className="onboarding-kicker">THE PROBLEM</div><h2>Tired of going broke before your next allowance?</h2><p>Not anymore. Spends gives your money a little more foresight, so you can see the runway before it disappears.</p></div>,
-      <div className="onboarding-slide" key="how"><span className="onboarding-number">02</span><div className="onboarding-kicker">HOW IT WORKS</div><h2>Know when your money runs out.</h2><p>Add your allowance and log each expense. Based on your spending habits, Spends tells you how many days your balance may last at this pace.</p></div>,
+      <div className="onboarding-slide" key="how"><span className="onboarding-number">02</span><div className="onboarding-kicker">HOW IT WORKS</div><h2>Keep every payment counted.</h2><p>Spends can detect UPI payments from Gmail. For cash payments, add the expense manually so your balance stays accurate.</p></div>,
       <div className="onboarding-slide onboarding-name-slide" key="name"><span className="onboarding-number">03</span><div className="onboarding-kicker">MAKE IT YOURS</div><h2>What should we call you?</h2><p>Use your name to personalize your Spends experience.</p><label>Name<input autoFocus={step === 3} value={name} onChange={(event) => setName(event.target.value)} placeholder="Your name" /></label></div>,
     ]
 
@@ -319,11 +365,11 @@ function NavButton({ icon, label, active, onClick, badge, className = '', animat
   return <button className={`${active ? 'nav-button active' : 'nav-button'} ${className}`} onClick={handleClick}><span key={animateIcon || animation ? iconAnimation : undefined} className={iconClass}>{icon}</span><span>{label}</span>{badge && <b>{badge}</b>}</button>
 }
 
-function Dashboard({ metrics, activity, simulatedDate, onAddExpense, onAddAllowance, onSelect }) {
+function Dashboard({ metrics, activity, simulatedDate, onAddExpense, onAddAllowance, onSyncGmail, gmailSyncing, onSelect }) {
   const status = walletStatus(metrics.balance)
   return <div className="content dashboard-content"><OverviewHoverSurface>
     <HoverSliderGroup className="hero-grid">
-      <div className="balance-card overview-hover-card"><img className="balance-wireframe" src={spendsLogoWireframe} alt="" /><div className="card-label light-label"><span className="status-dot" /> WALLET</div><div className="balance-value">{money(metrics.balance)}</div><p className="balance-caption">{status.mascot} Status: <strong>{status.label}</strong> · as of {toDisplayDate(simulatedDate)}</p><div className="hp-meter"><span style={{ width: `${Math.min(100, Math.max(4, metrics.balance / Math.max(metrics.latestAllowance?.amount || metrics.balance, 1) * 100))}%` }} /></div><div className="balance-footer"><span><ArrowDownLeft size={15} /> {money(metrics.totalReceived)} received</span><span><ArrowUpRight size={15} /> {money(metrics.totalSpent)} spent</span></div></div>
+      <div className="balance-card overview-hover-card"><img className="balance-wireframe" src={spendsLogoWireframe} alt="" /><div className="wallet-card-head"><div className="card-label light-label"><span className="status-dot" /> WALLET</div></div><div className="balance-value">{money(metrics.balance)}</div><p className="balance-caption">{status.mascot} Status: <strong>{status.label}</strong> · as of {toDisplayDate(simulatedDate)}</p><button className="wallet-sync" onClick={onSyncGmail} disabled={gmailSyncing || !metrics.latestAllowance} title={metrics.latestAllowance ? 'Sync Gmail receipts' : 'Add an allowance before syncing Gmail'}><RefreshCw className={gmailSyncing ? 'spin' : ''} size={14} /> {gmailSyncing ? 'Syncing' : 'Sync Gmail'}</button><div className="hp-meter"><span style={{ width: `${Math.min(100, Math.max(4, metrics.balance / Math.max(metrics.latestAllowance?.amount || metrics.balance, 1) * 100))}%` }} /></div><div className="balance-footer"><span><ArrowDownLeft size={15} /> {money(metrics.totalReceived)} received</span><span><ArrowUpRight size={15} /> {money(metrics.totalSpent)} spent</span></div></div>
       <button className="expense-hero-card overview-hover-card" data-tutorial-target="expense" disabled={metrics.balance <= 0} onClick={onAddExpense}><span className="expense-hero-icon"><Plus size={34} /></span><span className="card-label">QUICK LOG</span><strong>Add Expense</strong><p>{metrics.balance > 0 ? 'Quickly log spending before you forget.' : 'Add allowance before logging spending.'}</p></button>
     </HoverSliderGroup>
     <HoverSliderGroup className="metric-grid">
